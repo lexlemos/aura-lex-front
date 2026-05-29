@@ -11,6 +11,7 @@ export function LayersPanel() {
     cases, 
     activeCaseId, 
     setFocusedNodeId,
+    setReadingNodeData,
     isRightSidebarOpen,
     toggleRightSidebar,
   } = useGraphStore()
@@ -19,11 +20,13 @@ export function LayersPanel() {
 
   const handleLayerSelect = (layerName: string) => {
     if (!activeCase) return
+    const cleanName = layerName.replace(/\s*\(Ciclo detectado\)$/i, "").trim()
     const matchedNode = activeCase.nodes.find(
-      (n) => n.title.toLowerCase() === layerName.toLowerCase()
+      (n) => n.title.toLowerCase() === cleanName.toLowerCase()
     )
     if (matchedNode) {
       setFocusedNodeId(matchedNode.id)
+      setReadingNodeData(matchedNode)
     }
   }
 
@@ -33,12 +36,21 @@ export function LayersPanel() {
     const edges = activeCase.edges
     const roots = allNodes.filter((n) => !edges.some((e) => e.target === n.id))
 
+    const visited = new Set<string>()
+
     const buildSubTree = (node: DecisionNode): TreeItem => {
+      if (visited.has(node.id)) {
+        return `${node.title} (Ciclo detectado)`
+      }
+      visited.add(node.id)
       const children = allNodes.filter((n) => edges.some((e) => e.source === node.id && e.target === n.id))
       if (children.length === 0) {
+        visited.delete(node.id)
         return node.title
       }
-      return [node.title, ...children.map(buildSubTree)]
+      const result: TreeItem = [node.title, ...children.map(buildSubTree)]
+      visited.delete(node.id)
+      return result
     }
 
     return roots.map((root) => buildSubTree(root))

@@ -93,7 +93,9 @@ export function SidebarCases() {
               <button
                 onClick={(e) => {
                   e.stopPropagation()
-                  deleteCase(c.id)
+                  if (window.confirm("Tem certeza que deseja excluir este caso? Esta ação não pode ser desfeita.")) {
+                    deleteCase(c.id)
+                  }
                 }}
                 className="opacity-0 group-hover:opacity-100 hover:text-red-400 p-1 rounded transition-all shrink-0 cursor-pointer"
                 title="Deletar caso"

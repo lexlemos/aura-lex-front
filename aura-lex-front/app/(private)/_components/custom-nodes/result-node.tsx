@@ -7,9 +7,10 @@ import { FlowNode } from "@/types/graph"
 
 export function ResultNodeComponent({ data, selected }: NodeProps<FlowNode>) {
   // Ajuste visual para destacar se é um resultado positivo ou neutro
-  const isPositive = data.title.toLowerCase().includes("procedente") || 
-                     data.title.toLowerCase().includes("mantida") || 
-                     data.title.toLowerCase().includes("deferido")
+  const title = data?.title || ""
+  const isPositive = title.toLowerCase().includes("procedente") || 
+                     title.toLowerCase().includes("mantida") || 
+                     title.toLowerCase().includes("deferido")
 
   const borderStyles = selected
     ? "border-indigo-500 ring-2 ring-indigo-500/20"
@@ -40,11 +41,11 @@ export function ResultNodeComponent({ data, selected }: NodeProps<FlowNode>) {
       </div>
 
       <h4 className="font-bold text-sm tracking-tight truncate text-zinc-900 dark:text-zinc-50">
-        {data.title}
+        {title}
       </h4>
 
       <p className="text-xs text-zinc-500 dark:text-zinc-400 leading-relaxed min-h-[40px] break-words line-clamp-3">
-        {data.description}
+        {data?.description || ""}
       </p>
     </div>
   )

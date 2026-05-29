@@ -6,12 +6,11 @@ import { Scale, Gavel, BookOpen } from "lucide-react"
 import { FlowNode } from "@/types/graph"
 
 export function DecisionNodeComponent({ data, selected }: NodeProps<FlowNode>) {
-  const context = data.regulatoryContext || "general"
+  const context = data?.regulatoryContext || "general"
 
-  // Mapeamento de estilos, ícones e rótulos com base no contexto regulatório (Inglês e Português para robustez)
   const getContextMeta = (ctx: string) => {
     const formatted = ctx.toLowerCase()
-    
+
     if (formatted === "law" || formatted === "lei") {
       return {
         label: "Lei",
@@ -22,7 +21,7 @@ export function DecisionNodeComponent({ data, selected }: NodeProps<FlowNode>) {
           : "border-blue-500/30 hover:border-blue-500 dark:border-blue-500/20 dark:hover:border-blue-400",
       }
     }
-    
+
     if (formatted === "jurisprudence" || formatted === "jurisprudência" || formatted === "jurisprudencia") {
       return {
         label: "Jurisprudência",
@@ -33,7 +32,7 @@ export function DecisionNodeComponent({ data, selected }: NodeProps<FlowNode>) {
           : "border-emerald-500/30 hover:border-emerald-500 dark:border-emerald-500/20 dark:hover:border-emerald-400",
       }
     }
-    
+
     if (formatted === "doctrine" || formatted === "doutrina") {
       return {
         label: "Doutrina",
@@ -44,7 +43,7 @@ export function DecisionNodeComponent({ data, selected }: NodeProps<FlowNode>) {
           : "border-purple-500/30 hover:border-purple-500 dark:border-purple-500/20 dark:hover:border-purple-400",
       }
     }
-    
+
     // Default (Geral)
     return {
       label: "Decisão",
@@ -77,11 +76,11 @@ export function DecisionNodeComponent({ data, selected }: NodeProps<FlowNode>) {
       </div>
 
       <h4 className="font-bold text-sm tracking-tight truncate text-zinc-900 dark:text-zinc-50">
-        {data.title}
+        {data?.title || ""}
       </h4>
 
       <p className="text-xs text-zinc-500 dark:text-zinc-400 leading-relaxed min-h-[40px] break-words line-clamp-3">
-        {data.description}
+        {data?.description || ""}
       </p>
 
       <Handle

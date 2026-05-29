@@ -46,7 +46,8 @@ function TreeNode({
   const handleToggle = () => {
     if (isFolder) {
       setIsOpen(!isOpen)
-    } else if (onFileSelect) {
+    }
+    if (onFileSelect) {
       onFileSelect(name)
     }
   }

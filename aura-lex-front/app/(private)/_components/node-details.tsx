@@ -9,6 +9,7 @@ import {
   SheetContent,
   SheetHeader,
   SheetTitle,
+  SheetDescription,
   SheetFooter,
   SheetClose,
 } from "@/components/ui/sheet"
@@ -43,9 +44,13 @@ export function NodeDetails() {
       doctrine: <BookOpen className="h-3.5 w-3.5 shrink-0" />,
     }
 
+    const type = refItem.type in colors ? refItem.type : "law"
+    const colorClass = colors[type]
+    const icon = icons[type]
+
     const chipContent = (
-      <span className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full border text-xs font-semibold cursor-pointer transition-colors ${colors[refItem.type]}`}>
-        {icons[refItem.type]}
+      <span className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full border text-xs font-semibold cursor-pointer transition-colors ${colorClass}`}>
+        {icon}
         <span>{refItem.title}</span>
         {refItem.url && <ExternalLink className="h-3 w-3 opacity-60 shrink-0" />}
       </span>
@@ -72,32 +77,37 @@ export function NodeDetails() {
     <Sheet open={!!focusedNodeId} onOpenChange={handleOpenChange}>
       <SheetContent className="w-full sm:max-w-md bg-zinc-950/95 dark:bg-zinc-950/95 border-l border-zinc-800 text-zinc-100 flex flex-col h-full shadow-2xl p-0">
         
+        {/* Header da Sheet (Sempre renderizado para acessibilidade ARIA/Radix) */}
+        <SheetHeader className="p-6 border-b border-zinc-850 flex flex-col gap-2.5 text-left shrink-0">
+          <div className="flex items-center gap-2">
+            <span className={`text-[10px] font-extrabold uppercase px-2.5 py-0.5 rounded-md tracking-wide ${
+              readingNodeData?.type === "decision"
+                ? "bg-amber-500/10 text-amber-500 border border-amber-500/20"
+                : "bg-zinc-500/10 text-zinc-400 border border-zinc-500/20"
+            }`}>
+              {readingNodeData?.type === "decision" ? "Decisão" : readingNodeData?.type === "result" ? "Resultado" : "Carregando"}
+            </span>
+            
+            {readingNodeData?.regulatoryContext && readingNodeData.regulatoryContext !== "general" && (
+              <span className="text-[10px] font-bold uppercase px-2 py-0.5 rounded bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">
+                {readingNodeData.regulatoryContext === "law" ? "Lei" :
+                 readingNodeData.regulatoryContext === "jurisprudence" ? "Jurisprudência" : "Doutrina"}
+              </span>
+            )}
+          </div>
+          
+          <SheetTitle className="text-lg font-bold tracking-tight text-zinc-50">
+            {readingNodeData?.title || "Carregando Detalhes..."}
+          </SheetTitle>
+
+          {/* Descrição ARIA de acessibilidade (Visivel apenas para leitores de tela) */}
+          <SheetDescription className="sr-only">
+            {readingNodeData?.description || "Detalhes adicionais sobre o nó selecionado."}
+          </SheetDescription>
+        </SheetHeader>
+
         {readingNodeData ? (
           <>
-            {/* Header da Sheet */}
-            <SheetHeader className="p-6 border-b border-zinc-850 flex flex-col gap-2.5 text-left">
-              <div className="flex items-center gap-2">
-                <span className={`text-[10px] font-extrabold uppercase px-2.5 py-0.5 rounded-md tracking-wide ${
-                  readingNodeData.type === "decision"
-                    ? "bg-amber-500/10 text-amber-500 border border-amber-500/20"
-                    : "bg-zinc-550/10 text-zinc-400 border border-zinc-550/20"
-                }`}>
-                  {readingNodeData.type === "decision" ? "Decisão" : "Resultado"}
-                </span>
-                
-                {readingNodeData.regulatoryContext && readingNodeData.regulatoryContext !== "general" && (
-                  <span className="text-[10px] font-bold uppercase px-2 py-0.5 rounded bg-indigo-500/10 text-indigo-400 border border-indigo-500/20">
-                    {readingNodeData.regulatoryContext === "law" ? "Lei" :
-                     readingNodeData.regulatoryContext === "jurisprudence" ? "Jurisprudência" : "Doutrina"}
-                  </span>
-                )}
-              </div>
-              
-              <SheetTitle className="text-lg font-bold tracking-tight text-zinc-50">
-                {readingNodeData.title}
-              </SheetTitle>
-            </SheetHeader>
-
             {/* Conteúdo Principal com Rolagem de Altura Limite */}
             <div className="flex-1 overflow-y-auto p-6 space-y-6 scrollbar-thin scrollbar-thumb-zinc-850">
               

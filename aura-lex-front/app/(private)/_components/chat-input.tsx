@@ -11,7 +11,7 @@ export function ChatInput() {
   const fileInputRef = React.useRef<HTMLInputElement>(null)
   const [prompt, setPrompt] = React.useState("")
 
-  const { fetchLegalQuery, isGenerating } = useGraphStore()
+  const { fetchLegalQuery, isGenerating, error: globalError, setError: setGlobalError } = useGraphStore()
 
   const {
     files,
@@ -84,20 +84,40 @@ export function ChatInput() {
   return (
     <div className="relative w-full">
 
-      {/* Alerta de erro de validação */}
-      {fileError && (
-        <div className="absolute bottom-full left-0 right-0 mb-3 bg-red-500/10 border border-red-500/20 rounded-xl p-3 text-xs text-red-600 dark:text-red-400 flex items-start gap-2 animate-in slide-in-from-bottom-2 duration-200">
-          <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
-          <div className="flex-1 flex justify-between items-center gap-2">
-            <span>{fileError}</span>
-            <button
-              type="button"
-              onClick={() => setFileError(null)}
-              className="text-red-500 hover:text-red-700 p-0.5 rounded cursor-pointer"
-            >
-              <X className="h-3.5 w-3.5" />
-            </button>
-          </div>
+      {/* Container de Alertas de Erro */}
+      {(globalError || fileError) && (
+        <div className="absolute bottom-full left-0 right-0 mb-3 flex flex-col gap-2 z-35">
+          {globalError && (
+            <div className="bg-red-500/10 border border-red-500/20 rounded-xl p-3 text-xs text-red-600 dark:text-red-400 flex items-start gap-2 animate-in slide-in-from-bottom-2 duration-200">
+              <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
+              <div className="flex-1 flex justify-between items-center gap-2">
+                <span>{globalError}</span>
+                <button
+                  type="button"
+                  onClick={() => setGlobalError(null)}
+                  className="text-red-500 hover:text-red-700 p-0.5 rounded cursor-pointer"
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              </div>
+            </div>
+          )}
+
+          {fileError && (
+            <div className="bg-red-500/10 border border-red-500/20 rounded-xl p-3 text-xs text-red-600 dark:text-red-400 flex items-start gap-2 animate-in slide-in-from-bottom-2 duration-200">
+              <AlertCircle className="h-4 w-4 shrink-0 mt-0.5" />
+              <div className="flex-1 flex justify-between items-center gap-2">
+                <span>{fileError}</span>
+                <button
+                  type="button"
+                  onClick={() => setFileError(null)}
+                  className="text-red-500 hover:text-red-700 p-0.5 rounded cursor-pointer"
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       )}
 
