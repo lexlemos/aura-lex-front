@@ -12,7 +12,8 @@ export function AuthGuard({ children }: { children: React.ReactNode }) {
     if (!auth) {
       router.push("/login")
     } else {
-      setIsAuthenticated(true)
+      const timer = setTimeout(() => setIsAuthenticated(true), 0)
+      return () => clearTimeout(timer)
     }
   }, [router])
 
