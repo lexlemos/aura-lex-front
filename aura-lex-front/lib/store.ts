@@ -1,45 +1,32 @@
 import { create } from "zustand"
-
-export interface ReferenceItem {
-  id: string
-  type: "jurisprudence" | "law" | "doctrine"
-  title: string
-  url?: string
-}
-
-export interface DecisionNode {
-  id: string
-  type: "decision" | "result"
-  title: string
-  description: string
-  references: ReferenceItem[]
-}
-
-export interface Relationship {
-  id: string
-  source: string
-  target: string
-  label: "SIM" | "NÃO"
-}
-
-export interface CaseItem {
-  id: string
-  title: string
-  nodes: DecisionNode[]
-  edges: Relationship[]
-}
+import { CaseItem, DecisionNode, Relationship } from "@/types/graph"
 
 interface GraphState {
   cases: CaseItem[]
   activeCaseId: string
   focusedNodeId: string | null
   readingNodeData: DecisionNode | null
+  isGenerating: boolean
+  error: string | null
+  isLeftSidebarOpen: boolean
+  isRightSidebarOpen: boolean
+
+  // Ações básicas
   setActiveCaseId: (id: string) => void
   setFocusedNodeId: (id: string | null) => void
   setReadingNodeData: (data: DecisionNode | null) => void
-  addNewCase: (title: string) => void
+  setGenerating: (generating: boolean) => void
+  setError: (error: string | null) => void
+  toggleLeftSidebar: () => void
+  toggleRightSidebar: () => void
+
+  // Mutações locais
+  addNewCase: (title: string, nodes?: DecisionNode[], edges?: Relationship[]) => string
   deleteCase: (id: string) => void
   addCustomNode: (caseId: string, node: DecisionNode, edge: Relationship) => void
+
+  // Comunicação com FastAPI
+  fetchLegalQuery: (query: string, files: File[]) => Promise<void>
 }
 
 const defaultCases: CaseItem[] = [
@@ -163,158 +150,50 @@ const defaultCases: CaseItem[] = [
       { id: "e6", source: "node-vinculo", target: "node-improcedente", label: "NÃO" },
     ],
   },
-  {
-    id: "case-2",
-    title: "Indenização por Danos Morais",
-    nodes: [
-      {
-        id: "node-root-2",
-        type: "decision",
-        title: "Ato Ilícito",
-        description: "Houve conduta ilícita, culposa ou dolosa do réu?",
-        references: [
-          {
-            id: "ref-2-1",
-            type: "law",
-            title: "Art. 186, CC",
-            url: "https://www.jusbrasil.com.br/topicos/10718503/artigo-186-da-lei-n-10406-de-10-de-janeiro-de-2002",
-          },
-        ],
-      },
-      {
-        id: "node-dano-2",
-        type: "decision",
-        title: "Dano Comprovado",
-        description: "A vítima sofreu efetivo abalo psicológico ou ofensa aos direitos de personalidade?",
-        references: [
-          {
-            id: "ref-2-2",
-            type: "law",
-            title: "Art. 5º, V, CF/88",
-            url: "https://www.jusbrasil.com.br/topicos/10647895/artigo-5-da-constituicao-federal-de-1988",
-          },
-        ],
-      },
-      {
-        id: "node-sem-ato-2",
-        type: "result",
-        title: "Ausência de Conduta",
-        description: "Improcedência. A conduta do réu estava no exercício regular de um direito.",
-        references: [
-          {
-            id: "ref-2-3",
-            type: "law",
-            title: "Art. 188, I, CC",
-            url: "https://www.jusbrasil.com.br/topicos/10718302/artigo-188-da-lei-n-10406-de-10-de-janeiro-de-2002",
-          },
-        ],
-      },
-      {
-        id: "node-nexo-2",
-        type: "decision",
-        title: "Nexo Causal",
-        description: "Existe relação direta de causa e efeito entre o ato ilícito e o dano?",
-        references: [
-          {
-            id: "ref-2-4",
-            type: "law",
-            title: "Art. 403, CC",
-            url: "https://www.jusbrasil.com.br/topicos/10708682/artigo-403-da-lei-n-10406-de-10-de-janeiro-de-2002",
-          },
-        ],
-      },
-      {
-        id: "node-sem-dano-2",
-        type: "result",
-        title: "Ausência de Dano",
-        description: "Improcedência. Mero dissabor cotidiano não gera direito a indenização moral.",
-        references: [
-          {
-            id: "ref-2-5",
-            type: "jurisprudence",
-            title: "Inadimplemento Contratual, STJ",
-          },
-        ],
-      },
-      {
-        id: "node-indenizar-2",
-        type: "result",
-        title: "Dever de Indenizar",
-        description: "Procedência da ação com arbitramento do quantum indenizatório.",
-        references: [
-          {
-            id: "ref-2-6",
-            type: "law",
-            title: "Art. 927, CC",
-            url: "https://www.jusbrasil.com.br/topicos/10675662/artigo-927-da-lei-n-10406-de-10-de-janeiro-de-2002",
-          },
-        ],
-      },
-      {
-        id: "node-sem-nexo-2",
-        type: "result",
-        title: "Ausência de Responsabilidade",
-        description: "Improcedência. Ocorrência de culpa exclusiva da vítima ou de força maior.",
-        references: [
-          {
-            id: "ref-2-7",
-            type: "doctrine",
-            title: "Responsabilidade Civil - S. Venosa",
-          },
-        ],
-      },
-    ],
-    edges: [
-      { id: "e2-1", source: "node-root-2", target: "node-dano-2", label: "SIM" },
-      { id: "e2-2", source: "node-root-2", target: "node-sem-ato-2", label: "NÃO" },
-      { id: "e2-3", source: "node-dano-2", target: "node-nexo-2", label: "SIM" },
-      { id: "e2-4", source: "node-dano-2", target: "node-sem-dano-2", label: "NÃO" },
-      { id: "e2-5", source: "node-nexo-2", target: "node-indenizar-2", label: "SIM" },
-      { id: "e2-6", source: "node-nexo-2", target: "node-sem-nexo-2", label: "NÃO" },
-    ],
-  },
 ]
 
-export const useGraphStore = create<GraphState>((set) => ({
+export const useGraphStore = create<GraphState>((set, get) => ({
   cases: defaultCases,
   activeCaseId: "case-1",
   focusedNodeId: null,
   readingNodeData: null,
+  isGenerating: false,
+  error: null,
+  isLeftSidebarOpen: true,
+  isRightSidebarOpen: true,
 
-  setActiveCaseId: (id) => set({ activeCaseId: id, focusedNodeId: null, readingNodeData: null }),
+  setActiveCaseId: (id) => set({ activeCaseId: id, focusedNodeId: null, readingNodeData: null, error: null }),
   setFocusedNodeId: (id) => set({ focusedNodeId: id }),
   setReadingNodeData: (data) => set({ readingNodeData: data }),
+  setGenerating: (generating) => set({ isGenerating: generating }),
+  setError: (error) => set({ error }),
+  toggleLeftSidebar: () => set((state) => ({ isLeftSidebarOpen: !state.isLeftSidebarOpen })),
+  toggleRightSidebar: () => set((state) => ({ isRightSidebarOpen: !state.isRightSidebarOpen })),
 
-  addNewCase: (title) =>
-    set((state) => {
-      const newId = `case-${Date.now()}`
-      const newCase: CaseItem = {
-        id: newId,
-        title,
-        nodes: [
-          {
-            id: `node-root-${Date.now()}`,
-            type: "decision",
-            title: "Nó Inicial",
-            description: "Escreva no chat para criar novas hipóteses de decisão.",
-            references: [
-              {
-                id: `ref-init-${Date.now()}`,
-                type: "law",
-                title: "Art. 1º, Geral",
-              },
-            ],
-          },
-        ],
-        edges: [],
-      }
-      return {
-        cases: [newCase, ...state.cases],
-        activeCaseId: newId,
-        focusedNodeId: null,
-        readingNodeData: null,
-      }
-    }),
+  addNewCase: (title, nodes, edges) => {
+    const newId = `case-${Date.now()}`
+    const newCase: CaseItem = {
+      id: newId,
+      title,
+      nodes: nodes || [
+        {
+          id: `node-root-${Date.now()}`,
+          type: "decision",
+          title: "Nó Inicial",
+          description: "Escreva no chat para criar novas hipóteses de decisão.",
+          references: [],
+        },
+      ],
+      edges: edges || [],
+    }
+    set((state) => ({
+      cases: [newCase, ...state.cases],
+      activeCaseId: newId,
+      focusedNodeId: null,
+      readingNodeData: null,
+    }))
+    return newId
+  },
 
   deleteCase: (id) =>
     set((state) => {
@@ -336,13 +215,7 @@ export const useGraphStore = create<GraphState>((set) => ({
               type: "decision",
               title: "Nó Inicial",
               description: "Digite uma mensagem no chat para começar.",
-              references: [
-                {
-                  id: "ref-default-init",
-                  type: "law",
-                  title: "Art. 1º, Geral",
-                },
-              ],
+              references: [],
             },
           ],
           edges: [],
@@ -376,4 +249,38 @@ export const useGraphStore = create<GraphState>((set) => ({
         return c
       }),
     })),
+
+  fetchLegalQuery: async (query, files) => {
+    const store = get()
+    set({ isGenerating: true, error: null })
+
+    try {
+      const apiBaseUrl = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000"
+      const formData = new FormData()
+      formData.append("query", query)
+      files.forEach((file) => {
+        formData.append("files", file)
+      })
+
+      const response = await fetch(`${apiBaseUrl}/api/v1/legal-query`, {
+        method: "POST",
+        body: formData,
+      })
+
+      if (!response.ok) {
+        throw new Error(`Falha na requisição: ${response.statusText}`)
+      }
+
+      const data: CaseItem = await response.json()
+      
+      // Salva e ativa o caso gerado
+      store.addNewCase(data.title, data.nodes, data.edges)
+    } catch (err: unknown) {
+      console.error(err)
+      const errorMessage = err instanceof Error ? err.message : "Erro de rede ao conectar com a IA."
+      set({ error: errorMessage })
+    } finally {
+      set({ isGenerating: false })
+    }
+  },
 }))
