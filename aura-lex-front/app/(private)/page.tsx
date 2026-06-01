@@ -66,6 +66,7 @@ function getLayoutedElements(
 export default function DecisionTreeDashboard() {
   const router = useRouter()
   const viewportRef = React.useRef<HTMLDivElement>(null)
+  const textareaRef = React.useRef<HTMLTextAreaElement>(null)
 
   const {
     cases,
@@ -95,6 +96,15 @@ export default function DecisionTreeDashboard() {
   const [isProfileOpen, setIsProfileOpen] = React.useState(false)
   const [isSettingsOpen, setIsSettingsOpen] = React.useState(false)
   const [isSidebarOpen, setIsSidebarOpen] = React.useState(true)
+
+  // Auto-resize prompt textarea (max 5 lines, ~120px)
+  React.useEffect(() => {
+    const textarea = textareaRef.current
+    if (textarea) {
+      textarea.style.height = "auto"
+      textarea.style.height = `${Math.min(textarea.scrollHeight, 120)}px`
+    }
+  }, [prompt])
 
   const activeCase = cases.find((c) => c.id === activeCaseId) ?? cases[0]
 
@@ -148,7 +158,8 @@ export default function DecisionTreeDashboard() {
     if (
       target.closest(".decision-node-card") ||
       target.closest("button") ||
-      target.closest("input")
+      target.closest("input") ||
+      target.closest("textarea")
     ) {
       return
     }
@@ -177,8 +188,8 @@ export default function DecisionTreeDashboard() {
     }
   }
 
-  const handlePromptSubmit = (e: React.FormEvent) => {
-    e.preventDefault()
+  const handlePromptSubmit = (e?: React.FormEvent | React.KeyboardEvent) => {
+    if (e) e.preventDefault()
     if (!prompt.trim() || isAnalyzing) return
 
     // ⚠️ parent_node_id é OBRIGATÓRIO no backend (valida existência em case.nodes)
@@ -195,6 +206,13 @@ export default function DecisionTreeDashboard() {
 
     // Chama a store que orquestra: IA → inject {node,edge} → Toast
     analyzeAndAddNode(activeCaseId, currentPrompt, parentNodeId)
+  }
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault()
+      handlePromptSubmit()
+    }
   }
 
   const handleLogout = () => {
@@ -440,17 +458,19 @@ export default function DecisionTreeDashboard() {
         <div className="absolute bottom-6 left-1/2 -translate-x-[calc(50%+150px)] w-full max-w-2xl px-4 z-10">
           <form
             onSubmit={handlePromptSubmit}
-            className={`bg-white dark:bg-zinc-800 border rounded-2xl shadow-xl flex items-center p-2 transition-all ${
+            className={`bg-white dark:bg-zinc-800 border rounded-2xl shadow-xl flex items-end p-2 transition-all ${
               isAnalyzing
                 ? "border-amber-400/50 dark:border-amber-500/40 ring-2 ring-amber-400/20"
                 : "border-zinc-200 dark:border-zinc-700 focus-within:ring-2 focus-within:ring-indigo-500/20 dark:focus-within:ring-indigo-400/20"
             }`}
           >
-            <input
-              type="text"
+            <textarea
+              ref={textareaRef}
               value={prompt}
               onChange={(e) => setPrompt(e.target.value)}
+              onKeyDown={handleKeyDown}
               disabled={isAnalyzing}
+              rows={1}
               placeholder={
                 isAnalyzing
                   ? "⚖️ A IA está analisando a jurisprudência..."
@@ -458,7 +478,7 @@ export default function DecisionTreeDashboard() {
                     ? "Descreva a hipótese jurídica para adicionar ao grafo..."
                     : "Selecione um nó no grafo e descreva a próxima hipótese..."
               }
-              className="flex-1 bg-transparent px-4 py-2 text-sm focus:outline-none border-none placeholder-zinc-400 dark:placeholder-zinc-500 text-zinc-900 dark:text-zinc-100 disabled:opacity-60"
+              className="flex-1 bg-transparent px-4 py-2 text-sm focus:outline-none border-none placeholder-zinc-400 dark:placeholder-zinc-550 text-zinc-900 dark:text-zinc-100 disabled:opacity-60 resize-none overflow-y-auto"
             />
             <button
               type="submit"
@@ -466,7 +486,7 @@ export default function DecisionTreeDashboard() {
               className={`h-9 w-9 rounded-xl flex items-center justify-center transition-colors shrink-0 shadow-sm cursor-pointer disabled:cursor-not-allowed ${
                 prompt.trim()
                   ? "bg-blue-600 hover:bg-blue-700 dark:bg-blue-500 dark:hover:bg-blue-600 text-white"
-                  : "bg-zinc-100 dark:bg-zinc-900 text-zinc-400 dark:text-zinc-600 disabled:opacity-60"
+                  : "bg-zinc-100 dark:bg-zinc-900 text-zinc-400 dark:text-zinc-650 disabled:opacity-60"
               }`}
               title={isAnalyzing ? "IA processando..." : "Analisar com IA"}
             >
