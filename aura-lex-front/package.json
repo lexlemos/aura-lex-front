@@ -10,6 +10,7 @@
   },
   "dependencies": {
     "@types/dagre": "^0.7.54",
+    "axios": "^1.16.1",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "dagre": "^0.8.5",

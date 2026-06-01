@@ -22,7 +22,8 @@ import {
   ChevronLeft,
   ChevronRight,
   PanelLeftClose,
-  PanelLeftOpen
+  PanelLeftOpen,
+  Loader2
 } from "lucide-react"
 import { FileTree, TreeItem } from "@/components/file-tree"
 import { useGraphStore, DecisionNode, Relationship, ReferenceItem } from "@/lib/store"
@@ -38,7 +39,7 @@ function getLayoutedElements(
   edges: Relationship[]
 ): PositionedNode[] {
   const g = new dagre.graphlib.Graph()
-  
+
   g.setGraph({ rankdir: "TB", nodesep: 140, ranksep: 100 })
   g.setDefaultEdgeLabel(() => ({}))
 
@@ -71,12 +72,16 @@ export default function DecisionTreeDashboard() {
     activeCaseId,
     focusedNodeId,
     readingNodeData,
+    isLoadingCases,
+    isAnalyzing,
     setActiveCaseId,
     setFocusedNodeId,
     setReadingNodeData,
     addNewCase,
     deleteCase,
-    addCustomNode,
+    loadCases,
+    analyzeAndAddNode,
+    updateRootNodeDescription,
   } = useGraphStore()
 
   // Pan states
@@ -91,15 +96,27 @@ export default function DecisionTreeDashboard() {
   const [isSettingsOpen, setIsSettingsOpen] = React.useState(false)
   const [isSidebarOpen, setIsSidebarOpen] = React.useState(true)
 
-  const activeCase = cases.find((c) => c.id === activeCaseId) || cases[0]
+  const activeCase = cases.find((c) => c.id === activeCaseId) ?? cases[0]
+
+  const rootNode = React.useMemo(() => {
+    if (!activeCase || activeCase.nodes.length === 0) return undefined
+    return activeCase.nodes.find((n) => !activeCase.edges.some((e) => e.target === n.id)) || activeCase.nodes[0]
+  }, [activeCase])
+
+  // Hidratação inicial: carrega todos os casos da API no mount
+  React.useEffect(() => {
+    loadCases()
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   const positionedNodes = React.useMemo(() => {
+    if (!activeCase) return []
     return getLayoutedElements(activeCase.nodes, activeCase.edges)
-  }, [activeCase.nodes, activeCase.edges])
+  }, [activeCase?.nodes, activeCase?.edges])
 
   // Center root node automatically on case change
   React.useEffect(() => {
-    const rootNode = activeCase.nodes[0]
+    if (!activeCase) return  // aguardando hidratação da API
     if (rootNode && viewportRef.current) {
       const rect = viewportRef.current.getBoundingClientRect()
       const layoutedRoot = positionedNodes.find((n) => n.id === rootNode.id)
@@ -108,22 +125,22 @@ export default function DecisionTreeDashboard() {
         setPanY(80)
       }
     }
-  }, [activeCaseId])
+  }, [activeCaseId, activeCase, rootNode, positionedNodes])
 
   // Center on layer focus
   React.useEffect(() => {
-    if (focusedNodeId && viewportRef.current) {
-      const node = positionedNodes.find((n) => n.id === focusedNodeId)
-      if (node) {
-        const rect = viewportRef.current.getBoundingClientRect()
-        setIsAnimating(true)
-        setPanX(rect.width / 2 - node.x - 110)
-        setPanY(rect.height / 2 - node.y - 55)
-        const timer = setTimeout(() => setIsAnimating(false), 300)
-        return () => clearTimeout(timer)
-      }
+    if (!activeCase || !focusedNodeId || !viewportRef.current) return
+    const node = positionedNodes.find((n) => n.id === focusedNodeId)
+    if (node) {
+      const rect = viewportRef.current.getBoundingClientRect()
+      setIsAnimating(true)
+      setPanX(rect.width / 2 - node.x - 110)
+      setPanY(rect.height / 2 - node.y - 55)
+      const timer = setTimeout(() => setIsAnimating(false), 300)
+      return () => clearTimeout(timer)
     }
-  }, [focusedNodeId, positionedNodes])
+  }, [focusedNodeId, positionedNodes, activeCase])
+
 
   const handleMouseDown = (e: React.MouseEvent) => {
     if (e.button !== 0) return
@@ -162,46 +179,22 @@ export default function DecisionTreeDashboard() {
 
   const handlePromptSubmit = (e: React.FormEvent) => {
     e.preventDefault()
-    if (!prompt.trim()) return
+    if (!prompt.trim() || isAnalyzing) return
 
-    const parentNodeId = focusedNodeId || activeCase.nodes[0]?.id
-    if (!parentNodeId) return
+    // ⚠️ parent_node_id é OBRIGATÓRIO no backend (valida existência em case.nodes)
+    // Fallback explícito para o nó raiz quando nenhum nó está focado
+    const parentNodeId = focusedNodeId ?? rootNode?.id
+    if (!parentNodeId || !activeCaseId) return
 
-    const trimmedPrompt = prompt.toLowerCase()
-    const newNodeId = `node-custom-${Date.now()}`
-    const isNo = trimmedPrompt.includes("não") || trimmedPrompt.includes("improcedente")
-    const isEmpty = trimmedPrompt.includes("vazio") || trimmedPrompt.includes("sem lei") || trimmedPrompt.includes("sem citação")
-
-    const newNode: DecisionNode = {
-      id: newNodeId,
-      type:
-        trimmedPrompt.includes("sentença") || trimmedPrompt.includes("fim") || trimmedPrompt.includes("extinção")
-          ? "result"
-          : "decision",
-      title: prompt.substring(0, 20) + (prompt.length > 20 ? "..." : ""),
-      description: prompt,
-      references: isEmpty ? [] : [
-        {
-          id: `ref-custom-${Date.now()}`,
-          type: "doctrine",
-          title: "Precedente de IA",
-        }
-      ],
-    }
-
-    const newEdge: Relationship = {
-      id: `edge-custom-${Date.now()}`,
-      source: parentNodeId,
-      target: newNodeId,
-      label: isNo ? "NÃO" : "SIM",
-    }
-
-    addCustomNode(activeCaseId, newNode, newEdge)
+    const currentPrompt = prompt
     setPrompt("")
 
-    setTimeout(() => {
-      setFocusedNodeId(newNodeId)
-    }, 50)
+    if (rootNode && rootNode.description === "Escreva no chat para criar novas hipóteses de decisão.") {
+      updateRootNodeDescription(activeCaseId, currentPrompt)
+    }
+
+    // Chama a store que orquestra: IA → inject {node,edge} → Toast
+    analyzeAndAddNode(activeCaseId, currentPrompt, parentNodeId)
   }
 
   const handleLogout = () => {
@@ -225,9 +218,21 @@ export default function DecisionTreeDashboard() {
     return roots.map((root) => buildSubTree(root))
   }
 
+  // Estado inicial enquanto a API não respondeu ainda
+  if (!activeCase) {
+    return (
+      <div className="h-screen w-screen flex items-center justify-center bg-zinc-950">
+        <div className="flex flex-col items-center gap-4">
+          <Loader2 className="h-8 w-8 text-indigo-400 animate-spin" />
+          <p className="text-sm text-zinc-400 font-medium">Carregando casos jurídicos...</p>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className="h-screen w-screen flex overflow-hidden bg-zinc-50 dark:bg-zinc-950 font-sans text-zinc-900 dark:text-zinc-100">
-      
+
       {/* 1. SIDEBAR ESQUERDA - Recolhível */}
       <div className="relative shrink-0 flex h-full">
         {/* Botão toggle — fora do aside para não ser cortado */}
@@ -239,127 +244,143 @@ export default function DecisionTreeDashboard() {
           {isSidebarOpen ? <ChevronLeft className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
         </button>
 
-      <aside
-        className={`bg-zinc-700 text-zinc-100 flex flex-col h-full border-r border-zinc-600 z-10 transition-all duration-300 ease-in-out ${
-          isSidebarOpen ? "w-[280px]" : "w-[60px]"
-        }`}
-      >
+        <aside
+          className={`bg-zinc-700 text-zinc-100 flex flex-col h-full border-r border-zinc-600 z-10 transition-all duration-300 ease-in-out ${isSidebarOpen ? "w-[280px]" : "w-[60px]"
+            }`}
+        >
 
-        <div className={`p-4 flex flex-col gap-4 ${isSidebarOpen ? "" : "items-center px-2"}`}>
-          <div className="flex items-center gap-2 px-2 overflow-hidden">
-            <Scale className="h-5 w-5 text-indigo-400 fill-indigo-400/20 shrink-0" />
-            {isSidebarOpen && (
-              <span className="font-bold text-lg tracking-tight bg-gradient-to-r from-indigo-200 to-indigo-400 bg-clip-text text-transparent whitespace-nowrap">
-                Aura Lex Grafos
-              </span>
+          <div className={`p-4 flex flex-col gap-4 ${isSidebarOpen ? "" : "items-center px-2"}`}>
+            <div className="flex items-center gap-2 px-2 overflow-hidden">
+              <Scale className="h-5 w-5 text-indigo-400 fill-indigo-400/20 shrink-0" />
+              {isSidebarOpen && (
+                <span className="font-bold text-lg tracking-tight bg-gradient-to-r from-indigo-200 to-indigo-400 bg-clip-text text-transparent whitespace-nowrap">
+                  Aura Lex
+                </span>
+              )}
+            </div>
+
+            {isSidebarOpen ? (
+              <button
+                onClick={() => addNewCase(`Novo Caso Decisório ${cases.length + 1}`)}
+                disabled={isLoadingCases}
+                className="w-full flex items-center justify-center gap-2 py-3 px-4 rounded-xl bg-zinc-600 hover:bg-zinc-500 disabled:opacity-50 disabled:cursor-not-allowed text-zinc-100 border border-zinc-500 hover:border-zinc-400 transition-all font-medium text-sm shadow-sm group cursor-pointer"
+              >
+                {isLoadingCases
+                  ? <Loader2 className="h-4 w-4 animate-spin" />
+                  : <Plus className="h-4 w-4 text-zinc-300 group-hover:text-zinc-100 transition-colors" />
+                }
+                Novo Caso
+              </button>
+            ) : (
+              <button
+                onClick={() => addNewCase(`Novo Caso Decisório ${cases.length + 1}`)}
+                disabled={isLoadingCases}
+                className="w-10 h-10 flex items-center justify-center rounded-xl bg-zinc-600 hover:bg-zinc-500 disabled:opacity-50 text-zinc-100 border border-zinc-500 hover:border-zinc-400 transition-all cursor-pointer"
+                title="Novo Caso"
+              >
+                {isLoadingCases ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
+              </button>
             )}
           </div>
 
-          {isSidebarOpen ? (
-            <button
-              onClick={() => addNewCase(`Novo Caso Decisório ${cases.length + 1}`)}
-              className="w-full flex items-center justify-center gap-2 py-3 px-4 rounded-xl bg-zinc-600 hover:bg-zinc-500 text-zinc-100 border border-zinc-500 hover:border-zinc-400 transition-all font-medium text-sm shadow-sm group cursor-pointer"
-            >
-              <Plus className="h-4 w-4 text-zinc-300 group-hover:text-zinc-100 transition-colors" />
-              Novo Caso
-            </button>
-          ) : (
-            <button
-              onClick={() => addNewCase(`Novo Caso Decisório ${cases.length + 1}`)}
-              className="w-10 h-10 flex items-center justify-center rounded-xl bg-zinc-600 hover:bg-zinc-500 text-zinc-100 border border-zinc-500 hover:border-zinc-400 transition-all cursor-pointer"
-              title="Novo Caso"
-            >
-              <Plus className="h-4 w-4" />
-            </button>
-          )}
-        </div>
+          <div className="flex-1 overflow-y-auto px-3 py-2 space-y-1 overflow-x-hidden">
+            {isSidebarOpen && (
+              <div className="px-3 py-1.5 text-xs font-semibold text-zinc-300 uppercase tracking-wider">
+                Casos em Andamento
+              </div>
+            )}
 
-        <div className="flex-1 overflow-y-auto px-3 py-2 space-y-1 overflow-x-hidden">
-          {isSidebarOpen && (
-            <div className="px-3 py-1.5 text-xs font-semibold text-zinc-300 uppercase tracking-wider">
-              Casos em Andamento
+            {/* Estado de carregamento inicial */}
+            {isLoadingCases && cases.length === 0 && (
+              <div className="flex flex-col gap-2 px-2 py-1">
+                {[1, 2, 3].map((i) => (
+                  <div
+                    key={i}
+                    className={`h-10 rounded-lg bg-zinc-600/50 animate-pulse ${!isSidebarOpen ? "w-10" : "w-full"}`}
+                  />
+                ))}
+              </div>
+            )}
+
+            {cases.map((c) => (
+              <div
+                key={c.id}
+                onClick={() => setActiveCaseId(c.id)}
+                title={!isSidebarOpen ? c.title : undefined}
+                className={`group flex items-center justify-between px-3 py-2.5 rounded-lg cursor-pointer transition-all ${c.id === activeCaseId
+                    ? "bg-zinc-500 text-white font-medium shadow-sm"
+                    : "text-zinc-200 hover:bg-zinc-600/70 hover:text-white"
+                  } ${!isSidebarOpen ? "justify-center px-2" : ""}`}
+              >
+                <div className={`flex items-center gap-2.5 min-w-0 ${!isSidebarOpen ? "justify-center" : ""}`}>
+                  <GitFork className="h-4 w-4 shrink-0 text-zinc-300 group-hover:text-zinc-100" />
+                  {isSidebarOpen && <span className="truncate text-sm">{c.title}</span>}
+                </div>
+                {isSidebarOpen && (
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      deleteCase(c.id)
+                    }}
+                    disabled={isLoadingCases}
+                    className="opacity-0 group-hover:opacity-100 hover:text-red-400 p-1 rounded transition-all shrink-0 cursor-pointer disabled:pointer-events-none"
+                    title="Deletar caso"
+                  >
+                    <Trash2 className="h-3.5 w-3.5" />
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+
+          {/* Profile Popover */}
+          {isProfileOpen && isSidebarOpen && (
+            <div className="absolute bottom-20 left-4 right-4 bg-zinc-600 border border-zinc-500 rounded-xl shadow-2xl p-2 flex flex-col gap-1 z-35 animate-in slide-in-from-bottom-2 duration-150">
+              <button
+                onClick={() => {
+                  setIsSettingsOpen(true)
+                  setIsProfileOpen(false)
+                }}
+                className="w-full text-left px-3 py-2 text-xs font-semibold rounded-lg hover:bg-zinc-500 text-zinc-300 hover:text-white transition-colors cursor-pointer flex items-center gap-2"
+              >
+                <Settings className="h-3.5 w-3.5" />
+                Configurações da Conta
+              </button>
+              <div className="h-[1px] bg-zinc-500 my-1" />
+              <button
+                onClick={handleLogout}
+                className="w-full text-left px-3 py-2 text-xs font-semibold rounded-lg hover:bg-red-500/10 text-red-400 hover:text-red-300 transition-colors cursor-pointer flex items-center gap-2"
+              >
+                <LogOut className="h-3.5 w-3.5" />
+                Sair da Conta
+              </button>
             </div>
           )}
-          {cases.map((c) => (
-            <div
-              key={c.id}
-              onClick={() => setActiveCaseId(c.id)}
-              title={!isSidebarOpen ? c.title : undefined}
-              className={`group flex items-center justify-between px-3 py-2.5 rounded-lg cursor-pointer transition-all ${
-                c.id === activeCaseId
-                  ? "bg-zinc-500 text-white font-medium shadow-sm"
-                  : "text-zinc-200 hover:bg-zinc-600/70 hover:text-white"
-              } ${!isSidebarOpen ? "justify-center px-2" : ""}`}
-            >
-              <div className={`flex items-center gap-2.5 min-w-0 ${!isSidebarOpen ? "justify-center" : ""}`}>
-                <GitFork className="h-4 w-4 shrink-0 text-zinc-300 group-hover:text-zinc-100" />
-                {isSidebarOpen && <span className="truncate text-sm">{c.title}</span>}
-              </div>
-              {isSidebarOpen && (
-                <button
-                  onClick={(e) => {
-                    e.stopPropagation()
-                    deleteCase(c.id)
-                  }}
-                  className="opacity-0 group-hover:opacity-100 hover:text-red-400 p-1 rounded transition-all shrink-0 cursor-pointer"
-                  title="Deletar caso"
-                >
-                  <Trash2 className="h-3.5 w-3.5" />
-                </button>
-              )}
+
+          <div
+            onClick={() => isSidebarOpen && setIsProfileOpen(!isProfileOpen)}
+            className={`p-4 border-t border-zinc-600 bg-zinc-700/80 flex items-center gap-3 transition-colors ${isSidebarOpen ? "cursor-pointer hover:bg-zinc-600/40" : "cursor-default justify-center"
+              }`}
+          >
+            <div className="h-9 w-9 rounded-full bg-indigo-600 flex items-center justify-center text-white font-semibold text-sm shrink-0">
+              AL
             </div>
-          ))}
-        </div>
-
-        {/* Profile Popover */}
-        {isProfileOpen && isSidebarOpen && (
-          <div className="absolute bottom-20 left-4 right-4 bg-zinc-600 border border-zinc-500 rounded-xl shadow-2xl p-2 flex flex-col gap-1 z-35 animate-in slide-in-from-bottom-2 duration-150">
-            <button
-              onClick={() => {
-                setIsSettingsOpen(true)
-                setIsProfileOpen(false)
-              }}
-              className="w-full text-left px-3 py-2 text-xs font-semibold rounded-lg hover:bg-zinc-500 text-zinc-300 hover:text-white transition-colors cursor-pointer flex items-center gap-2"
-            >
-              <Settings className="h-3.5 w-3.5" />
-              Configurações da Conta
-            </button>
-            <div className="h-[1px] bg-zinc-500 my-1" />
-            <button
-              onClick={handleLogout}
-              className="w-full text-left px-3 py-2 text-xs font-semibold rounded-lg hover:bg-red-500/10 text-red-400 hover:text-red-300 transition-colors cursor-pointer flex items-center gap-2"
-            >
-              <LogOut className="h-3.5 w-3.5" />
-              Sair da Conta
-            </button>
+            {isSidebarOpen && (
+              <>
+                <div className="flex flex-col min-w-0 flex-1">
+                  <span className="text-sm font-semibold text-zinc-100 truncate">Allex Lemes</span>
+                  <span className="text-xs text-zinc-300 truncate">allex@auralex.com</span>
+                </div>
+                <Settings className="h-4 w-4 text-zinc-400 hover:text-zinc-200 transition-colors" />
+              </>
+            )}
           </div>
-        )}
-
-        <div 
-          onClick={() => isSidebarOpen && setIsProfileOpen(!isProfileOpen)}
-          className={`p-4 border-t border-zinc-600 bg-zinc-700/80 flex items-center gap-3 transition-colors ${
-            isSidebarOpen ? "cursor-pointer hover:bg-zinc-600/40" : "cursor-default justify-center"
-          }`}
-        >
-          <div className="h-9 w-9 rounded-full bg-indigo-600 flex items-center justify-center text-white font-semibold text-sm shrink-0">
-            AL
-          </div>
-          {isSidebarOpen && (
-            <>
-              <div className="flex flex-col min-w-0 flex-1">
-                <span className="text-sm font-semibold text-zinc-100 truncate">Allex Lemes</span>
-                <span className="text-xs text-zinc-300 truncate">allex@auralex.com</span>
-              </div>
-              <Settings className="h-4 w-4 text-zinc-400 hover:text-zinc-200 transition-colors" />
-            </>
-          )}
-        </div>
-      </aside>
+        </aside>
       </div>
 
       {/* 2. ÁREA CENTRAL - Playground Canvas */}
       <main className="flex-1 flex flex-col h-full relative bg-zinc-50 dark:bg-zinc-900 overflow-hidden pr-[300px]">
-        
+
         <header className="h-14 border-b border-zinc-200 dark:border-zinc-800 bg-white/70 dark:bg-zinc-900/70 backdrop-blur-md px-6 flex items-center justify-between z-10">
           <div className="flex items-center gap-2">
             <span className="text-sm font-semibold text-zinc-500 dark:text-zinc-400">Caso /</span>
@@ -371,7 +392,7 @@ export default function DecisionTreeDashboard() {
               <span className="font-bold text-zinc-700 dark:text-zinc-300">
                 {(activeCase.nodes.find(n => n.id === focusedNodeId)?.title)}
               </span>
-              <button 
+              <button
                 onClick={() => setFocusedNodeId(null)}
                 className="hover:bg-zinc-200 dark:hover:bg-zinc-800 p-0.5 rounded cursor-pointer"
               >
@@ -388,28 +409,28 @@ export default function DecisionTreeDashboard() {
           onMouseMove={handleMouseMove}
           onMouseUp={handleMouseUp}
           onMouseLeave={handleMouseUp}
-          className={`flex-1 relative overflow-hidden select-none bg-zinc-50 dark:bg-zinc-900 bg-[radial-gradient(#e2e8f0_1px,transparent_1px)] [background-size:16px_16px] dark:bg-[radial-gradient(#27272a_1px,transparent_1px)] ${
-            isPanning ? "cursor-grabbing" : "cursor-grab"
-          }`}
+          className={`flex-1 relative overflow-hidden select-none bg-zinc-50 dark:bg-zinc-900 bg-[radial-gradient(#e2e8f0_1px,transparent_1px)] [background-size:16px_16px] dark:bg-[radial-gradient(#27272a_1px,transparent_1px)] ${isPanning ? "cursor-grabbing" : "cursor-grab"
+            }`}
         >
-          
+
           <div
             style={{
               transform: `translate(${panX}px, ${panY}px)`,
               width: "2400px",
               height: "2400px",
             }}
-            className={`absolute inset-0 origin-top-left ${
-              isAnimating ? "transition-transform duration-300 cubic-bezier(0.2, 0.8, 0.2, 1)" : ""
-            }`}
+            className={`absolute inset-0 origin-top-left ${isAnimating ? "transition-transform duration-300 cubic-bezier(0.2, 0.8, 0.2, 1)" : ""
+              }`}
           >
-            
+
             <EdgeRenderer edges={activeCase.edges} nodes={positionedNodes} />
 
-            <NodeRenderer 
-              nodes={positionedNodes} 
+            <NodeRenderer
+              nodes={positionedNodes}
               focusedNodeId={focusedNodeId}
               onCardClick={setReadingNodeData}
+              rootNodeId={rootNode?.id}
+              edges={activeCase.edges}
             />
 
           </div>
@@ -419,25 +440,40 @@ export default function DecisionTreeDashboard() {
         <div className="absolute bottom-6 left-1/2 -translate-x-[calc(50%+150px)] w-full max-w-2xl px-4 z-10">
           <form
             onSubmit={handlePromptSubmit}
-            className="bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 rounded-2xl shadow-xl flex items-center p-2 focus-within:ring-2 focus-within:ring-indigo-500/20 dark:focus-within:ring-indigo-400/20 transition-all"
+            className={`bg-white dark:bg-zinc-800 border rounded-2xl shadow-xl flex items-center p-2 transition-all ${
+              isAnalyzing
+                ? "border-amber-400/50 dark:border-amber-500/40 ring-2 ring-amber-400/20"
+                : "border-zinc-200 dark:border-zinc-700 focus-within:ring-2 focus-within:ring-indigo-500/20 dark:focus-within:ring-indigo-400/20"
+            }`}
           >
             <input
               type="text"
               value={prompt}
               onChange={(e) => setPrompt(e.target.value)}
+              disabled={isAnalyzing}
               placeholder={
-                focusedNodeId 
-                  ? "Adicionar nó conectado (digite 'vazio' para testar estado sem citações)..." 
-                  : "Selecione um nó acima e digite para adicionar ramificações..."
+                isAnalyzing
+                  ? "⚖️ A IA está analisando a jurisprudência..."
+                  : focusedNodeId
+                    ? "Descreva a hipótese jurídica para adicionar ao grafo..."
+                    : "Selecione um nó no grafo e descreva a próxima hipótese..."
               }
-              className="flex-1 bg-transparent px-4 py-2 text-sm focus:outline-none border-none placeholder-zinc-400 dark:placeholder-zinc-500 text-zinc-900 dark:text-zinc-100"
+              className="flex-1 bg-transparent px-4 py-2 text-sm focus:outline-none border-none placeholder-zinc-400 dark:placeholder-zinc-500 text-zinc-900 dark:text-zinc-100 disabled:opacity-60"
             />
             <button
               type="submit"
-              className="h-9 w-9 rounded-xl bg-indigo-650 hover:bg-indigo-700 dark:bg-indigo-500 dark:hover:bg-indigo-600 text-white flex items-center justify-center transition-colors shrink-0 shadow-sm cursor-pointer"
-              title="Inserir nó jurídico"
+              disabled={isAnalyzing || !prompt.trim()}
+              className={`h-9 w-9 rounded-xl flex items-center justify-center transition-colors shrink-0 shadow-sm cursor-pointer disabled:cursor-not-allowed ${
+                prompt.trim()
+                  ? "bg-blue-600 hover:bg-blue-700 dark:bg-blue-500 dark:hover:bg-blue-600 text-white"
+                  : "bg-zinc-100 dark:bg-zinc-900 text-zinc-400 dark:text-zinc-600 disabled:opacity-60"
+              }`}
+              title={isAnalyzing ? "IA processando..." : "Analisar com IA"}
             >
-              <Send className="h-4 w-4" />
+              {isAnalyzing
+                ? <Loader2 className="h-4 w-4 animate-spin" />
+                : <Send className="h-4 w-4" />
+              }
             </button>
           </form>
         </div>
@@ -459,8 +495,8 @@ export default function DecisionTreeDashboard() {
         </div>
 
         <div className="flex-1 overflow-y-auto p-3">
-          <FileTree 
-            data={getFigmaLayersData()} 
+          <FileTree
+            data={getFigmaLayersData()}
             onFileSelect={handleLayerSelect}
           />
         </div>
@@ -472,7 +508,7 @@ export default function DecisionTreeDashboard() {
           <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl w-full max-w-md p-6 shadow-2xl relative animate-in zoom-in-95 duration-200 text-zinc-900 dark:text-zinc-100">
             <div className="flex items-center justify-between mb-2">
               <h3 className="text-lg font-bold">Configurações da Conta</h3>
-              <button 
+              <button
                 onClick={() => setIsSettingsOpen(false)}
                 className="p-1.5 rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors cursor-pointer"
               >
@@ -482,7 +518,7 @@ export default function DecisionTreeDashboard() {
             <p className="text-sm text-zinc-550 dark:text-zinc-450 mb-6">
               Gerencie as preferências da sua conta e do visualizador de grafos jurídicos.
             </p>
-            
+
             <div className="space-y-4">
               <div>
                 <label className="text-xs font-bold text-zinc-400 block mb-1">NOME COMPLETO</label>
@@ -530,7 +566,7 @@ export default function DecisionTreeDashboard() {
 
       {/* 2. BACKDROP PARA O DRAWER LATERAL */}
       {readingNodeData && (
-        <div 
+        <div
           className="fixed inset-0 bg-black/45 backdrop-blur-xs z-40 animate-in fade-in duration-200"
           onClick={() => setReadingNodeData(null)}
         />
@@ -538,9 +574,11 @@ export default function DecisionTreeDashboard() {
 
       {/* 2. DRAWER LATERAL DE DETALHES DO NÓ (Desliza à direita) */}
       {readingNodeData && (
-        <NodeDetailsDrawer 
-          node={readingNodeData} 
-          onClose={() => setReadingNodeData(null)} 
+        <NodeDetailsDrawer
+          node={readingNodeData}
+          onClose={() => setReadingNodeData(null)}
+          isRoot={readingNodeData.id === rootNode?.id}
+          isDecision={activeCase.edges.some((e) => e.source === readingNodeData.id)}
         />
       )}
 
@@ -575,6 +613,16 @@ function EdgeRenderer({ edges, nodes }: EdgeRendererProps) {
         const child = nodes.find((n) => n.id === edge.target)
         if (!parent || !child) return null
 
+        // Se uma aresta não tiver as coordenadas exatas de origem (source X,Y) e destino (target X,Y) calculadas, ela não deve ser desenhada
+        if (
+          typeof parent.x !== "number" || isNaN(parent.x) ||
+          typeof parent.y !== "number" || isNaN(parent.y) ||
+          typeof child.x !== "number" || isNaN(child.x) ||
+          typeof child.y !== "number" || isNaN(child.y)
+        ) {
+          return null
+        }
+
         const x1 = parent.x + 110
         const y1 = parent.y + 110
 
@@ -585,7 +633,7 @@ function EdgeRenderer({ edges, nodes }: EdgeRendererProps) {
         const pathD = `M ${x1} ${y1} C ${x1} ${midY}, ${x2} ${midY}, ${x2} ${y2}`
 
         return (
-          <g key={edge.id}>
+          <g key={edge.id || `${edge.source}-${edge.target}`}>
             <path
               d={pathD}
               fill="none"
@@ -606,11 +654,10 @@ function EdgeRenderer({ edges, nodes }: EdgeRendererProps) {
                   x={x1 + (x2 - x1) / 3}
                   y={y1 + (y2 - y1) / 3 + 4}
                   textAnchor="middle"
-                  className={`text-[10px] font-bold tracking-wider ${
-                    edge.label === "SIM"
+                  className={`text-[10px] font-bold tracking-wider ${edge.label === "SIM"
                       ? "fill-emerald-600 dark:fill-emerald-400"
                       : "fill-red-500 dark:fill-red-400"
-                  }`}
+                    }`}
                 >
                   {edge.label}
                 </text>
@@ -628,13 +675,17 @@ interface NodeRendererProps {
   nodes: PositionedNode[]
   focusedNodeId: string | null
   onCardClick: (node: DecisionNode) => void
+  rootNodeId?: string
+  edges: Relationship[]
 }
 
-function NodeRenderer({ nodes, focusedNodeId, onCardClick }: NodeRendererProps) {
+function NodeRenderer({ nodes, focusedNodeId, onCardClick, rootNodeId, edges }: NodeRendererProps) {
   return (
     <>
       {nodes.map((node) => {
         const isFocused = node.id === focusedNodeId
+        const isRoot = node.id === rootNodeId
+        const isDecision = edges.some((e) => e.source === node.id)
 
         const handleMouseDown = (e: React.MouseEvent) => {
           e.stopPropagation()
@@ -652,19 +703,21 @@ function NodeRenderer({ nodes, focusedNodeId, onCardClick }: NodeRendererProps) 
             onMouseDown={handleMouseDown}
             onClick={handleClick}
             style={{ left: `${node.x}px`, top: `${node.y}px` }}
-            className={`absolute w-[220px] rounded-xl border bg-white dark:bg-zinc-900 p-4 transition-all duration-200 flex flex-col gap-2 decision-node-card select-none cursor-pointer ${
-              isFocused
+            className={`absolute w-[220px] rounded-xl border bg-white dark:bg-zinc-900 p-4 transition-all duration-200 flex flex-col gap-2 decision-node-card select-none cursor-pointer ${isFocused
                 ? "ring-2 ring-indigo-500 border-indigo-500 dark:ring-indigo-400 dark:border-indigo-400 shadow-md scale-105 z-10"
-                : "border-zinc-200 dark:border-zinc-800 hover:border-zinc-400 dark:hover:border-zinc-700 shadow-sm"
-            }`}
+                : isRoot
+                  ? "border-indigo-350 dark:border-indigo-850 hover:border-indigo-500 dark:hover:border-indigo-700 shadow-sm bg-indigo-50/10 dark:bg-indigo-950/5"
+                  : "border-zinc-200 dark:border-zinc-800 hover:border-zinc-400 dark:hover:border-zinc-700 shadow-sm"
+              }`}
           >
             <div className="flex items-center justify-between">
-              <span className={`text-[10px] font-extrabold uppercase px-2 py-0.5 rounded tracking-wide ${
-                node.type === "decision"
-                  ? "bg-amber-100 text-amber-800 dark:bg-amber-950/50 dark:text-amber-450"
-                  : "bg-zinc-100 text-zinc-800 dark:bg-zinc-800 dark:text-zinc-350"
-              }`}>
-                {node.type === "decision" ? "Decisão" : "Resultado"}
+              <span className={`text-[10px] font-extrabold uppercase px-2 py-0.5 rounded tracking-wide ${isRoot
+                  ? "bg-indigo-100 text-indigo-800 dark:bg-indigo-950/50 dark:text-indigo-400"
+                  : isDecision
+                    ? "bg-amber-100 text-amber-800 dark:bg-amber-950/50 dark:text-amber-450"
+                    : "bg-zinc-100 text-zinc-800 dark:bg-zinc-800 dark:text-zinc-350"
+                }`}>
+                {isRoot ? "Inicial" : isDecision ? "Decisão" : "Resultado"}
               </span>
               <GitFork className="h-3 w-3 text-zinc-400" />
             </div>
@@ -720,21 +773,26 @@ function ReferenceChip({ refItem }: { refItem: ReferenceItem }) {
 interface NodeDetailsDrawerProps {
   node: DecisionNode
   onClose: () => void
+  isRoot: boolean
+  isDecision: boolean
 }
 
-function NodeDetailsDrawer({ node, onClose }: NodeDetailsDrawerProps) {
+function NodeDetailsDrawer({ node, onClose, isRoot, isDecision }: NodeDetailsDrawerProps) {
   const hasReferences = node.references && node.references.length > 0
 
   return (
     <div className="fixed top-0 right-0 h-full w-[400px] bg-white dark:bg-zinc-900 border-l border-zinc-200 dark:border-zinc-800 shadow-2xl z-50 flex flex-col animate-in slide-in-from-right duration-300 text-zinc-900 dark:text-zinc-100">
-      
+
       {/* Header */}
       <div className="flex items-center justify-between px-6 py-4 border-b border-zinc-150 dark:border-zinc-850">
         <div className="flex items-center gap-2">
-          <span className={`text-[10px] font-extrabold uppercase px-2 py-0.5 rounded tracking-wide ${
-            node.type === "decision" ? "bg-amber-100 text-amber-800 dark:bg-amber-950/50 dark:text-amber-450" : "bg-zinc-100 text-zinc-850 dark:bg-zinc-800 dark:text-zinc-300"
-          }`}>
-            {node.type === "decision" ? "Decisão" : "Resultado"}
+          <span className={`text-[10px] font-extrabold uppercase px-2 py-0.5 rounded tracking-wide ${isRoot
+              ? "bg-indigo-100 text-indigo-800 dark:bg-indigo-950/50 dark:text-indigo-400"
+              : isDecision
+                ? "bg-amber-100 text-amber-800 dark:bg-amber-950/50 dark:text-amber-450"
+                : "bg-zinc-100 text-zinc-855 dark:bg-zinc-800 dark:text-zinc-300"
+            }`}>
+            {isRoot ? "Inicial" : isDecision ? "Decisão" : "Resultado"}
           </span>
           <h3 className="text-sm font-bold truncate max-w-[180px]">{node.title}</h3>
         </div>
@@ -748,36 +806,32 @@ function NodeDetailsDrawer({ node, onClose }: NodeDetailsDrawerProps) {
 
       {/* Body content scrollable */}
       <div className="flex-1 overflow-y-auto p-6 space-y-6">
-        
+
         {/* Description Section */}
         <div className="space-y-1.5">
-          <h4 className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">Descrição Jurídica</h4>
+          {!isRoot && (
+            <h4 className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider">Descrição Jurídica</h4>
+          )}
           <p className="text-sm text-zinc-700 dark:text-zinc-350 leading-relaxed font-medium">
             {node.description}
           </p>
         </div>
 
         {/* References Section */}
-        <div className="space-y-3">
-          <h4 className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider flex items-center gap-1.5">
-            <Scale className="h-4 w-4 text-indigo-500" />
-            Citações & Referências Jurídicas
-          </h4>
+        {hasReferences && (
+          <div className="space-y-3">
+            <h4 className="text-[10px] font-bold text-zinc-400 uppercase tracking-wider flex items-center gap-1.5">
+              <Scale className="h-4 w-4 text-indigo-500" />
+              {isRoot ? "Anexos" : "Citações & Referências Jurídicas"}
+            </h4>
 
-          {/* 4. ESTADO VAZIO (Empty State) */}
-          {!hasReferences ? (
-            <p className="text-xs text-zinc-400 dark:text-zinc-500 italic">
-              Nenhuma citação legal direta atrelada a este nó.
-            </p>
-          ) : (
-            /* 3. Reference Chips rendering */
             <div className="flex flex-wrap gap-2">
               {node.references.map((ref) => (
                 <ReferenceChip key={ref.id} refItem={ref} />
               ))}
             </div>
-          )}
-        </div>
+          </div>
+        )}
 
       </div>
 
